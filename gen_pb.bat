@@ -1,1 +1,1 @@
-protoc -I=election/ election/election.proto --go_out=plugins=grpc:election/rpc
+protoc --go_out=./election/rpc --go_opt=paths=import --go-grpc_out=./election/rpc/ --go-grpc_opt=paths=import election/election.proto
