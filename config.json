@@ -1,0 +1,29 @@
+{
+  "hello": "ok",
+  "node_list": [
+    {
+      "host": "localhost",
+      "port": 7001
+    },
+    {
+      "host": "localhost",
+      "port": 7002
+    },
+    {
+      "host": "localhost",
+      "port": 7003
+    }
+  ],
+  "log": {
+    "level": "debug",
+    "encoding": "json",
+    "outputPaths": ["stdout", "./log/log" ],
+    "errOutputPaths": ["stderr", "./log/err"],
+    "initialFields": {"foo": "bar"},
+    "encoderConfig": {
+      "messageKey": "m",
+      "levelKey": "l",
+      "levelEncoder": "lowercase"
+    }
+  }
+}

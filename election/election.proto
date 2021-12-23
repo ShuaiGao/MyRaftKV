@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+package service;
+
+option go_package = ".;election_grpc";
+
+service electionService {
+    rpc Oath(OathRequest) returns (OathReply) {}
+    rpc Heart(HeartRequest) returns (HeartReply) {}
+}
+
+message OathRequest {
+    string node_id = 1;
+    uint32 term = 2;
+}
+
+message OathReply {
+    string node_id = 1;
+    bool accept = 2;
+}
+
+message HeartRequest {
+
+}
+message HeartReply {
+
+}
