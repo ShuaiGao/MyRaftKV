@@ -1,0 +1,48 @@
+syntax = "proto3";
+
+package service;
+
+option go_package = ".;rpc";
+
+service electionService {
+    rpc Oath(OathRequest) returns (OathReply) {}
+    rpc Heart(HeartRequest) returns (HeartReply) {}
+    rpc Append(AppendEntryRequest) returns (AppendEntryReply) {}
+}
+
+message OathRequest {
+    string node_id = 1;
+    uint32 term = 2;
+}
+
+message OathReply {
+    string node_id = 1;
+    bool accept = 2;
+}
+
+message HeartRequest {
+    string from = 1;
+    uint32 term = 2;
+    uint32 commit_index = 3;
+}
+message HeartReply {
+    uint32 commit_index = 1;
+}
+
+message Entry {
+    uint32 term = 1;
+    uint32 index = 2;
+    string key = 3;
+    string value = 4;
+}
+message AppendEntryRequest {
+    Entry entry = 1;
+    uint32 pre_term = 2;
+    uint32 pre_index = 3;
+    uint32 commit_index = 4;
+}
+message AppendEntryReply {
+    bool accept = 1;
+    uint32 append_index = 2;
+    uint32 commit_index = 3;
+}

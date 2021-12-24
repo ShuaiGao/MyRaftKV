@@ -1,1 +1,1 @@
-protoc --go_out=./election/rpc --go_opt=paths=import --go-grpc_out=./election/rpc/ --go-grpc_opt=paths=import election/election.proto
+protoc --go_out=./node/rpc --go_opt=paths=import --go-grpc_out=./node/rpc/ --go-grpc_opt=paths=import node/node.proto

@@ -2,9 +2,9 @@
 // versions:
 // - protoc-gen-go-grpc v1.2.0
 // - protoc             v3.19.0
-// source: election/election.proto
+// source: node/node.proto
 
-package election_grpc
+package rpc
 
 import (
 	context "context"
@@ -24,6 +24,7 @@ const _ = grpc.SupportPackageIsVersion7
 type ElectionServiceClient interface {
 	Oath(ctx context.Context, in *OathRequest, opts ...grpc.CallOption) (*OathReply, error)
 	Heart(ctx context.Context, in *HeartRequest, opts ...grpc.CallOption) (*HeartReply, error)
+	Append(ctx context.Context, in *AppendEntryRequest, opts ...grpc.CallOption) (*AppendEntryReply, error)
 }
 
 type electionServiceClient struct {
@@ -52,12 +53,22 @@ func (c *electionServiceClient) Heart(ctx context.Context, in *HeartRequest, opt
 	return out, nil
 }
 
+func (c *electionServiceClient) Append(ctx context.Context, in *AppendEntryRequest, opts ...grpc.CallOption) (*AppendEntryReply, error) {
+	out := new(AppendEntryReply)
+	err := c.cc.Invoke(ctx, "/service.electionService/Append", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ElectionServiceServer is the server API for ElectionService service.
 // All implementations must embed UnimplementedElectionServiceServer
 // for forward compatibility
 type ElectionServiceServer interface {
 	Oath(context.Context, *OathRequest) (*OathReply, error)
 	Heart(context.Context, *HeartRequest) (*HeartReply, error)
+	Append(context.Context, *AppendEntryRequest) (*AppendEntryReply, error)
 	mustEmbedUnimplementedElectionServiceServer()
 }
 
@@ -70,6 +81,9 @@ func (UnimplementedElectionServiceServer) Oath(context.Context, *OathRequest) (*
 }
 func (UnimplementedElectionServiceServer) Heart(context.Context, *HeartRequest) (*HeartReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Heart not implemented")
+}
+func (UnimplementedElectionServiceServer) Append(context.Context, *AppendEntryRequest) (*AppendEntryReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Append not implemented")
 }
 func (UnimplementedElectionServiceServer) mustEmbedUnimplementedElectionServiceServer() {}
 
@@ -120,6 +134,24 @@ func _ElectionService_Heart_Handler(srv interface{}, ctx context.Context, dec fu
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ElectionService_Append_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AppendEntryRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ElectionServiceServer).Append(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/service.electionService/Append",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ElectionServiceServer).Append(ctx, req.(*AppendEntryRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ElectionService_ServiceDesc is the grpc.ServiceDesc for ElectionService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -135,7 +167,11 @@ var ElectionService_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "Heart",
 			Handler:    _ElectionService_Heart_Handler,
 		},
+		{
+			MethodName: "Append",
+			Handler:    _ElectionService_Append_Handler,
+		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "election/election.proto",
+	Metadata: "node/node.proto",
 }

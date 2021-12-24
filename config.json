@@ -19,7 +19,6 @@
     "encoding": "json",
     "outputPaths": ["stdout", "./log/log" ],
     "errOutputPaths": ["stderr", "./log/err"],
-    "initialFields": {"foo": "bar"},
     "encoderConfig": {
       "messageKey": "m",
       "levelKey": "l",

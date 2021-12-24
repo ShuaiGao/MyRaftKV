@@ -1,9 +1,9 @@
 package main
 
 import (
-	"MyRaft/election"
-	election_grpc "MyRaft/election/rpc"
 	"MyRaft/logger"
+	"MyRaft/node"
+	election_grpc "MyRaft/node/rpc"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -15,9 +15,9 @@ import (
 )
 
 type Config struct {
-	Hello     string                `json:"hello"`
-	NodeList  []election.NodeConfig `json:"node_list"`
-	LogConfig zap.Config            `json:"log"`
+	Hello     string            `json:"hello"`
+	NodeList  []node.NodeConfig `json:"node_list"`
+	LogConfig zap.Config        `json:"log"`
 }
 
 func loadConfig() *Config {
@@ -59,7 +59,7 @@ func main() {
 	}
 
 	s := grpc.NewServer()
-	node := election.CreateNode(config.NodeList, *IndexFlag)
+	node := node.CreateNode(config.NodeList, *IndexFlag)
 	go node.Start()
 	election_grpc.RegisterElectionServiceServer(s, node)
 	reflection.Register(s)
