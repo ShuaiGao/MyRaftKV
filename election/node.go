@@ -21,6 +21,7 @@ func (nc *NodeConfig) Address() string {
 }
 
 type Node struct {
+	*election_grpc.UnimplementedElectionServiceServer
 	id            string
 	electing      bool
 	lock          sync.RWMutex
