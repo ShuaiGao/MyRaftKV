@@ -1,5 +1,19 @@
 {
   "hello": "ok",
+  "db_service_list": [
+    {
+      "host": "localhost",
+      "port": 7101
+    },
+    {
+      "host": "localhost",
+      "port": 7102
+    },
+    {
+      "host": "localhost",
+      "port": 7103
+    }
+  ],
   "node_list": [
     {
       "host": "localhost",
@@ -14,11 +28,22 @@
       "port": 7003
     }
   ],
+  "redis": {
+    "address": "localhost:6379",
+    "password": "",
+    "db": 0
+  },
   "log": {
     "level": "debug",
     "encoding": "json",
-    "outputPaths": ["stdout", "./log/log" ],
-    "errOutputPaths": ["stderr", "./log/err"],
+    "outputPaths": [
+      "stdout",
+      "./log/log"
+    ],
+    "errOutputPaths": [
+      "stderr",
+      "./log/err"
+    ],
     "encoderConfig": {
       "messageKey": "m",
       "levelKey": "l",

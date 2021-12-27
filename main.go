@@ -1,6 +1,7 @@
 package main
 
 import (
+	"MyRaft/db"
 	"MyRaft/logger"
 	"MyRaft/node"
 	election_grpc "MyRaft/node/rpc"
@@ -15,9 +16,11 @@ import (
 )
 
 type Config struct {
-	Hello     string            `json:"hello"`
-	NodeList  []node.NodeConfig `json:"node_list"`
-	LogConfig zap.Config        `json:"log"`
+	Hello         string                 `json:"hello"`
+	NodeList      []node.NodeConfig      `json:"node_list"`
+	DBServiceList []node.DBServiceConfig `json:"db_service_list"`
+	LogConfig     zap.Config             `json:"log"`
+	RedisConfig   db.RedisConfig         `json:"redis"`
 }
 
 func loadConfig() *Config {
@@ -41,6 +44,46 @@ func loadConfig() *Config {
 
 var IndexFlag = flag.Int("i", -1, "index os node")
 
+func CreateNodeService(nodeList []node.NodeConfig, index int) {
+	nodeConfig := nodeList[index]
+	logger.Sugar().Info("Start Node listen :%d", nodeConfig.Port)
+	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", nodeConfig.Port))
+	if err != nil {
+		panic("端口监听失败：" + err.Error())
+		return
+	}
+
+	s := grpc.NewServer()
+	node := node.CreateNode(nodeList, *IndexFlag)
+	go node.Start()
+	election_grpc.RegisterElectionServiceServer(s, node)
+	reflection.Register(s)
+	err = s.Serve(lis)
+	if err != nil {
+		panic("开启服务失败：" + err.Error())
+		return
+	}
+}
+
+func CreateService(nodeIns *node.Node, dbServiceList []node.DBServiceConfig, index int) {
+	nodeConfig := dbServiceList[index]
+	logger.Sugar().Info("Start DBService listen :%d", nodeConfig.Port)
+	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", nodeConfig.Port))
+	if err != nil {
+		panic("端口监听失败：" + err.Error())
+		return
+	}
+
+	s := grpc.NewServer()
+	election_grpc.RegisterDBServiceServer(s, nodeIns)
+	reflection.Register(s)
+	err = s.Serve(lis)
+	if err != nil {
+		panic("开启服务失败：" + err.Error())
+		return
+	}
+}
+
 func main() {
 	flag.Parse()
 	config := loadConfig()
@@ -50,22 +93,8 @@ func main() {
 	logger.CreateLogger(config.LogConfig)
 	log := logger.Logger()
 	defer log.Sync()
-	nodeConfig := config.NodeList[*IndexFlag]
-	log.Sugar().Info("Start Node listen :%d", nodeConfig.Port)
-	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", nodeConfig.Port))
-	if err != nil {
-		panic("端口监听失败：" + err.Error())
-		return
-	}
-
-	s := grpc.NewServer()
-	node := node.CreateNode(config.NodeList, *IndexFlag)
-	go node.Start()
-	election_grpc.RegisterElectionServiceServer(s, node)
-	reflection.Register(s)
-	err = s.Serve(lis)
-	if err != nil {
-		panic("开启服务失败：" + err.Error())
-		return
-	}
+	db.ConnectRedis(config.RedisConfig)
+	log.Sugar().Info("Redis connect :%s", config.RedisConfig)
+	CreateNodeService(config.NodeList, *IndexFlag)
+	CreateService(node.GetNode(), config.DBServiceList, *IndexFlag)
 }

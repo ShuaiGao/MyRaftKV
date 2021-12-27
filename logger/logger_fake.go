@@ -12,7 +12,7 @@ type LoggerFake struct {
 var configFake = []byte(` {
 		"level": "debug",
 		"encoding": "json",
-		"outputPaths": ["stdout", "../log/log_fake" ],
+		"outputPaths": ["../log/log_fake" ],
 	    "errOutputPaths": ["stderr", "../log/err_fake"],
 	    "initialFields": {"foo": "bar"},
 	    "encoderConfig": {

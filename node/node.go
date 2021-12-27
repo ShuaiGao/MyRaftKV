@@ -9,6 +9,10 @@ import (
 	"time"
 )
 
+type DBServiceConfig struct {
+	Host string `json:"host"`
+	Port int    `json:"port"`
+}
 type NodeConfig struct {
 	Host string `json:"host"`
 	Port int    `json:"port"`
@@ -29,12 +33,12 @@ type WorkNode struct {
 type Item struct {
 	Index uint   `json:"index"`
 	Term  uint   `json:"term"`
-	Key   string `json:"key"`
-	Value string `json:"value"`
+	Log   string `json:"log"`
 }
 
 type Node struct {
 	*rpc.UnimplementedElectionServiceServer
+	*rpc.UnimplementedDBServiceServer
 	id            string
 	electing      bool
 	lock          sync.RWMutex
@@ -42,7 +46,6 @@ type Node struct {
 	leaderId      string    // leader id
 	heartBeat     time.Time // 心跳记录
 	state         NodeState // 节点状态
-	role          NodeRole  // 节点角色
 	OathAcceptNum int       // 同意选举的数量
 	config        []NodeConfig
 	configIndex   int
@@ -52,6 +55,9 @@ type Node struct {
 }
 
 func (n *Node) GetPreItem() *Item {
+	if len(n.ItemList) == 0 {
+		return &Item{Index: 0, Term: 0, Log: ""}
+	}
 	return n.ItemList[len(n.ItemList)-1]
 }
 func (n *Node) SetState(state NodeState) {
@@ -71,7 +77,24 @@ func (n *Node) GetMyConfig() NodeConfig {
 var thisNode *Node
 
 func CreateNode(nodeCfgList []NodeConfig, index int) *Node {
-	return &Node{id: fmt.Sprintf("%d", index), config: nodeCfgList, configIndex: index}
+	thisNode = &Node{
+		UnimplementedElectionServiceServer: nil,
+		UnimplementedDBServiceServer:       nil,
+		id:                                 fmt.Sprintf("%d", index),
+		electing:                           false,
+		lock:                               sync.RWMutex{},
+		Term:                               0,
+		leaderId:                           "",
+		heartBeat:                          time.Time{},
+		state:                              StateFollower,
+		OathAcceptNum:                      0,
+		config:                             nodeCfgList,
+		configIndex:                        index,
+		otherNodeList:                      nil,
+		ItemList:                           []*Item{},
+		CommitIndex:                        0,
+	}
+	return thisNode
 }
 
 func GetNode() *Node {
@@ -90,10 +113,10 @@ func (n *Node) Start() {
 }
 func (n *Node) loop() {
 	//logger.Logger().Info("node_loop", zap.Uint("term", n.Term), zap.Int("state", int(n.GetState())))
-	if n.GetState() == NodeStateElecting {
+	if n.GetState() == StateElecting {
 		// 选举过程
 		n.election()
-	} else if n.GetState() == NodeStateLeader {
+	} else if n.GetState() == StateLeader {
 		logger.Logger().Info("Leader 广播心跳")
 		go n.leaderSendHeart()
 	} else {
@@ -113,8 +136,7 @@ func (n *Node) leaderSendHeart() {
 }
 func (n *Node) timeout() {
 	logger.Logger().Info("心跳超时，切换到候选人状态")
-	n.SetState(NodeStateElecting)
-	n.role = NodeRoleCandidate
+	n.SetState(StateElecting)
 	n.OathAcceptNum = 0
 }
 
@@ -125,7 +147,7 @@ func (n *Node) election() {
 		if i == n.configIndex {
 			continue
 		}
-		n.SendOathRequest(node)
+		n.SendElectionRequest(node)
 	}
 	if n.OathAcceptNum*2 > len(n.config) {
 		// 选举成功
@@ -133,8 +155,7 @@ func (n *Node) election() {
 			zap.Uint("term", n.Term),
 			zap.String("leader", n.id),
 			zap.Int("oath_accept_num", n.OathAcceptNum))
-		n.SetState(NodeStateLeader)
-		n.role = NodeRoleLeader
+		n.SetState(StateLeader)
 	} else {
 		logger.Logger().Info("选举失败",
 			zap.Uint("term", n.Term),

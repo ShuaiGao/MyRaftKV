@@ -5,17 +5,19 @@ package service;
 option go_package = ".;rpc";
 
 service electionService {
-    rpc Oath(OathRequest) returns (OathReply) {}
+    rpc Election(ElectionRequest) returns (ElectionReply) {}
     rpc Heart(HeartRequest) returns (HeartReply) {}
     rpc Append(AppendEntryRequest) returns (AppendEntryReply) {}
 }
 
-message OathRequest {
+
+message ElectionRequest {
     string node_id = 1;
     uint32 term = 2;
+    uint32 index = 3;
 }
 
-message OathReply {
+message ElectionReply {
     string node_id = 1;
     bool accept = 2;
 }
@@ -32,7 +34,6 @@ message HeartReply {
 message Entry {
     uint32 term = 1;
     uint32 index = 2;
-    string key = 3;
     string value = 4;
 }
 message AppendEntryRequest {
@@ -45,4 +46,15 @@ message AppendEntryReply {
     bool accept = 1;
     uint32 append_index = 2;
     uint32 commit_index = 3;
+}
+
+service DBService {
+    rpc DBAppend(DBAppendLogRequest) returns (DBAppendLogReply) {}
+}
+
+message DBAppendLogRequest{
+    string log = 1;
+}
+message DBAppendLogReply{
+    int32 ret = 1;
 }

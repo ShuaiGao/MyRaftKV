@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-func (n *Node) SendOathRequest(cfg NodeConfig) {
+func (n *Node) SendElectionRequest(cfg NodeConfig) {
 	conn, err := grpc.Dial(cfg.Address(), grpc.WithInsecure())
 	if err != nil {
 		logger.Logger().Sugar().Fatal("did not connect:%s", cfg.Address())
@@ -19,9 +19,9 @@ func (n *Node) SendOathRequest(cfg NodeConfig) {
 	c := rpc.NewElectionServiceClient(conn)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond*300)
 	defer cancel()
-	r, err := c.Oath(ctx, &rpc.OathRequest{Term: uint32(n.Term), NodeId: n.id})
+	r, err := c.Election(ctx, &rpc.ElectionRequest{Term: uint32(n.Term), NodeId: n.id})
 	if err != nil {
-		logger.Logger().Warn("SendOathRequest_oath_error", zap.String("address", cfg.Address()), zap.Error(err))
+		logger.Logger().Warn("SendElectionRequest_oath_error", zap.String("address", cfg.Address()), zap.Error(err))
 		return
 	}
 	if r.Accept {
@@ -31,7 +31,7 @@ func (n *Node) SendOathRequest(cfg NodeConfig) {
 			cfg: cfg,
 		})
 	}
-	logger.Logger().Info("Send OathRequest",
+	logger.Logger().Info("Send ElectionRequest",
 		zap.String("node_id", n.id),
 		zap.String("vote_id", n.id),
 		zap.String("ticket_from", r.GetNodeId()),
@@ -95,6 +95,5 @@ func (n *Node) AppendEntry(node WorkNode, item *Item) {
 		zap.String("node_id", n.id),
 		zap.Uint("term", item.Term),
 		zap.Uint("index", item.Index),
-		zap.String("key", item.Key),
 	)
 }
