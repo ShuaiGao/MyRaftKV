@@ -18,8 +18,10 @@ message ElectionRequest {
 }
 
 message ElectionReply {
-    string node_id = 1;
-    bool accept = 2;
+    bool accept = 1;
+    string node_id = 2;
+    uint32 term = 3;
+    uint32 index = 4;
 }
 
 message HeartRequest {
@@ -41,6 +43,7 @@ message AppendEntryRequest {
     uint32 pre_term = 2;
     uint32 pre_index = 3;
     uint32 commit_index = 4;
+    string from = 5;
 }
 message AppendEntryReply {
     bool accept = 1;

@@ -6,7 +6,7 @@ type NodeRole int32
 const (
 	StateFollower    NodeState = 0 // 正常工作状态
 	StateNoAvailable NodeState = 1 // 不可用状态
-	StateElecting    NodeState = 2 // 选举中
+	StateCandidate   NodeState = 2 // 选举中
 	StateLeader      NodeState = 3 // leader状态
 
 	NodeRoleCandidate NodeRole = 0

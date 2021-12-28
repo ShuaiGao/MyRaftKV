@@ -5,6 +5,7 @@ import (
 	"MyRaft/logger"
 	"MyRaft/node"
 	election_grpc "MyRaft/node/rpc"
+	"MyRaft/raft"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -67,21 +68,22 @@ func CreateNodeService(nodeList []node.NodeConfig, index int) {
 
 func CreateService(nodeIns *node.Node, dbServiceList []node.DBServiceConfig, index int) {
 	nodeConfig := dbServiceList[index]
-	logger.Sugar().Info("Start DBService listen :%d", nodeConfig.Port)
-	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", nodeConfig.Port))
-	if err != nil {
-		panic("端口监听失败：" + err.Error())
-		return
-	}
-
-	s := grpc.NewServer()
-	election_grpc.RegisterDBServiceServer(s, nodeIns)
-	reflection.Register(s)
-	err = s.Serve(lis)
-	if err != nil {
-		panic("开启服务失败：" + err.Error())
-		return
-	}
+	raft.CreateDB(fmt.Sprintf(":%d", nodeConfig.Port), nodeIns)
+	//logger.Sugar().Info("Start DBService listen :%d", nodeConfig.Port)
+	//lis, err := net.Listen("tcp", fmt.Sprintf(":%d", nodeConfig.Port))
+	//if err != nil {
+	//	panic("端口监听失败：" + err.Error())
+	//	return
+	//}
+	//
+	//s := grpc.NewServer()
+	//election_grpc.RegisterDBServiceServer(s, nodeIns)
+	//reflection.Register(s)
+	//err = s.Serve(lis)
+	//if err != nil {
+	//	panic("开启服务失败：" + err.Error())
+	//	return
+	//}
 }
 
 func main() {
@@ -90,11 +92,13 @@ func main() {
 	if *IndexFlag < 0 || *IndexFlag >= len(config.NodeList) {
 		panic("index out of range")
 	}
+	nodeConfig := config.NodeList[*IndexFlag]
+	config.LogConfig.OutputPaths = append(config.LogConfig.OutputPaths, nodeConfig.LogPath)
 	logger.CreateLogger(config.LogConfig)
 	log := logger.Logger()
 	defer log.Sync()
 	db.ConnectRedis(config.RedisConfig)
 	log.Sugar().Info("Redis connect :%s", config.RedisConfig)
+	go CreateService(node.GetNode(), config.DBServiceList, *IndexFlag)
 	CreateNodeService(config.NodeList, *IndexFlag)
-	CreateService(node.GetNode(), config.DBServiceList, *IndexFlag)
 }

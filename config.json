@@ -17,15 +17,18 @@
   "node_list": [
     {
       "host": "localhost",
-      "port": 7001
+      "port": 7001,
+      "log": "./log/log_1"
     },
     {
       "host": "localhost",
-      "port": 7002
+      "port": 7002,
+      "log": "./log/log_2"
     },
     {
       "host": "localhost",
-      "port": 7003
+      "port": 7003,
+      "log": "./log/log_3"
     }
   ],
   "redis": {
@@ -37,12 +40,10 @@
     "level": "debug",
     "encoding": "json",
     "outputPaths": [
-      "stdout",
-      "./log/log"
+      "stdout"
     ],
     "errOutputPaths": [
-      "stderr",
-      "./log/err"
+      "stderr"
     ],
     "encoderConfig": {
       "messageKey": "m",
