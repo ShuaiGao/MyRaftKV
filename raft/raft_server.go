@@ -51,9 +51,7 @@ func AppendLog(c echo.Context) error {
 		PreTerm:  uint32(tailItem.Term),
 		From:     n.Id,
 		Entry:    &rpc.Entry{Term: uint32(n.Term), Index: uint32(tailItem.Index + 1), Value: log}})
-	for _, node := range n.OtherNodeList {
-		n.SendAppendEntry(node)
-	}
+	n.AppendEntry()
 	return c.JSON(http.StatusOK, &AppendLogRet{code: 0, msg: "ok"})
 }
 func hello(c echo.Context) error {

@@ -11,22 +11,28 @@ import (
 	"time"
 )
 
-func (n *Node) SendElectionRequest(cfg NodeConfig) {
-	conn, err := grpc.Dial(cfg.Address(), grpc.WithInsecure())
-	if err != nil {
-		logger.Logger().Sugar().Fatal("did not connect:%s", cfg.Address())
+type Client struct {
+	conn    *grpc.ClientConn
+	timeout time.Duration
+}
+
+func newClient(conn *grpc.ClientConn, timeout time.Duration) Client {
+	return Client{
+		conn:    conn,
+		timeout: timeout,
 	}
-	defer conn.Close()
-	c := rpc.NewElectionServiceClient(conn)
+}
+func (cli Client) SendElectionRequest(n *Node) error {
+	c := rpc.NewElectionServiceClient(cli.conn)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond*300)
 	defer cancel()
-	r, err := c.Election(ctx, &rpc.ElectionRequest{Term: uint32(n.Term), NodeId: n.Id})
+	r, err := c.Election(ctx, &rpc.ElectionRequest{Term: uint32(n.Term), NodeId: n.Id, Index: uint32(n.AcceptIndex)})
 	if err != nil {
-		logger.Logger().Warn("SendElectionRequest_oath_error", zap.String("address", cfg.Address()), zap.Error(err))
-		return
+		logger.Logger().Warn("SendElectionRequest_oath_error", zap.Error(err))
+		return err
 	}
 	if r.Accept {
-		n.OathAcceptNum++
+		n.AddOathAcceptNum(1)
 		//n.OtherNodeList = append(n.OtherNodeList, WorkNode{
 		//	Id:  r.NodeId,
 		//	cfg: cfg,
@@ -43,7 +49,8 @@ func (n *Node) SendElectionRequest(cfg NodeConfig) {
 		zap.String("vote_id", n.Id),
 		zap.String("ticket_from", r.GetNodeId()),
 		zap.Bool("accept", r.Accept),
-		zap.Int("oath_accept_num", n.OathAcceptNum))
+		zap.Int("oath_accept_num", n.GetOathAcceptNum()))
+	return nil
 }
 
 var kacp = keepalive.ClientParameters{
@@ -52,23 +59,17 @@ var kacp = keepalive.ClientParameters{
 	PermitWithoutStream: true,
 }
 
-func (n *Node) SendHeart(node *WorkNode) error {
+func (cli Client) SendHeart(n *Node, node *WorkNode) error {
 	// 心跳拨号需要keepalive，因为leader 对 flower 的通讯是频繁的
 	//conn, err := grpc.Dial(node.cfg.Address(), grpc.WithKeepaliveParams(kacp))
-	conn, err := grpc.Dial(node.cfg.Address(), grpc.WithInsecure())
-	if err != nil {
-		//logger.Sugar().Warn("did not connect:%s", zap.String("address", node.cfg.Address()), zap.Error(err))
-		return errors.Wrap(err, "disconnect")
-	}
-	defer conn.Close()
-	c := rpc.NewElectionServiceClient(conn)
+	c := rpc.NewElectionServiceClient(cli.conn)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	heart := &rpc.HeartRequest{From: n.Id, Term: uint32(n.Term)}
 	if node.commitIndex < node.acceptIndex {
 		heart.CommitIndex = uint32(node.commitIndex + 1)
 	}
-	_, err = c.Heart(ctx, heart)
+	_, err := c.Heart(ctx, heart)
 	if err != nil {
 		logger.Sugar().Warn("heart rpc error", zap.String("address", node.cfg.Address()), zap.Error(err))
 		return errors.Wrap(err, "rpc_error")
@@ -79,19 +80,12 @@ func (n *Node) SendHeart(node *WorkNode) error {
 		zap.Uint("from_term", n.Term),
 		zap.Uint("node_commit_index", node.commitIndex),
 		zap.Uint("node_accept_index", node.acceptIndex),
-		zap.Uint("node_commit_index", node.commitIndex),
 	)
 	return nil
 }
 
-func (n *Node) SendAppendEntry(node *WorkNode) {
-	conn, err := grpc.Dial(node.cfg.Address(), grpc.WithInsecure())
-	if err != nil {
-		logger.Sugar().Warn("SendAppendEntry did not connect:%s", zap.String("address", node.cfg.Address()), zap.Error(err))
-		return
-	}
-	defer conn.Close()
-	c := rpc.NewElectionServiceClient(conn)
+func (cli Client) SendAppendEntry(n *Node, node *WorkNode) error {
+	c := rpc.NewElectionServiceClient(cli.conn)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	item := n.GetTailItem()
@@ -125,4 +119,5 @@ func (n *Node) SendAppendEntry(node *WorkNode) {
 		zap.Uint("node_index", node.acceptIndex),
 		zap.Uint("node_commit", node.commitIndex),
 	)
+	return err
 }

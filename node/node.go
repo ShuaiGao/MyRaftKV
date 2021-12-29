@@ -5,6 +5,7 @@ import (
 	"MyRaft/node/rpc"
 	"fmt"
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
 	"sync"
 	"time"
 )
@@ -37,24 +38,26 @@ type Item struct {
 	Log   string `json:"log"`
 }
 
+var lockOathAcceptNum = sync.RWMutex{}
+
 type Node struct {
 	*rpc.UnimplementedElectionServiceServer
 	*rpc.UnimplementedDBServiceServer
-	Id            string
+	Id            string `json:"id"`
 	electing      bool
 	lock          sync.RWMutex
-	Term          uint      // 任期
+	Term          uint      `json:"term"` // 任期
 	leaderId      string    // leader Id
 	heartBeat     time.Time // 心跳记录
 	state         NodeState // 节点状态
-	OathAcceptNum int       // 同意选举的数量
+	OathAcceptNum int       `json:"oath_accept_num"` // 同意选举的数量
 	config        []NodeConfig
 	configIndex   uint
-	OtherNodeList []*WorkNode
-	ItemList      []*Item
-	CommitIndex   uint
-	AcceptIndex   uint
-	PreTerm       uint // 任期
+	OtherNodeList []*WorkNode `json:"other_node_list"`
+	ItemList      []*Item     `json:"item_list"`
+	CommitIndex   uint        `json:"commit_index"`
+	AcceptIndex   uint        `json:"accept_index"`
+	PreTerm       uint        `json:"pre_term"` // 任期
 }
 
 func (n *Node) GetItemByIndex(index uint) *Item {
@@ -67,14 +70,17 @@ func (n *Node) GetItemByIndex(index uint) *Item {
 }
 
 func (n *Node) GetPreItem(item *Item) *Item {
-	var pre *Item
+	var pre *Item = &Item{Index: 0, Term: 0, Log: ""}
+	if item == nil {
+		return n.GetTailItem()
+	}
 	for _, v := range n.ItemList {
 		if v.Index == item.Index {
-			return pre
+			break
 		}
 		pre = v
 	}
-	return &Item{Index: 0, Term: 0, Log: ""}
+	return pre
 }
 func (n *Node) GetTailItem() *Item {
 	if len(n.ItemList) == 0 {
@@ -87,6 +93,21 @@ func (n *Node) SetState(state NodeState) {
 	defer n.lock.Unlock()
 	//logger.Logger().Info("切换状态", zap.Int("pre_state", int(n.state)), zap.Int("after_state", int(state)))
 	n.state = state
+}
+func (n *Node) GetOathAcceptNum() int {
+	lockOathAcceptNum.RLock()
+	defer lockOathAcceptNum.RUnlock()
+	return n.OathAcceptNum
+}
+func (n *Node) SetOathAcceptNum(num int) {
+	lockOathAcceptNum.Lock()
+	defer lockOathAcceptNum.Unlock()
+	n.OathAcceptNum = num
+}
+func (n *Node) AddOathAcceptNum(num int) {
+	lockOathAcceptNum.Lock()
+	defer lockOathAcceptNum.Unlock()
+	n.OathAcceptNum = n.OathAcceptNum + num
 }
 func (n *Node) GetState() NodeState {
 	n.lock.Lock()
@@ -165,35 +186,49 @@ func (n *Node) loop() {
 
 func (n *Node) leaderSendHeart() {
 	for _, node := range n.OtherNodeList {
-		n.SendHeart(node)
+		conn, err := grpc.Dial(node.cfg.Address(), grpc.WithInsecure())
+		if err != nil {
+			continue
+		}
+		newClient(conn, time.Second).SendHeart(n, node)
 	}
 	n.CheckCommitId()
 }
 func (n *Node) timeout() {
 	logger.Logger().Info("心跳超时，切换到候选人状态")
 	n.SetState(StateCandidate)
-	n.OathAcceptNum = 0
 }
 
 func (n *Node) election() {
-	n.OathAcceptNum = 1
+	n.SetOathAcceptNum(1)
 	n.Term++
+	wg := sync.WaitGroup{}
 	for _, node := range n.OtherNodeList {
-		n.SendElectionRequest(node.cfg)
+		wg.Add(1)
+		go func() {
+			conn, err := grpc.Dial(node.cfg.Address(), grpc.WithInsecure())
+			if err != nil {
+				return
+			}
+			newClient(conn, time.Second).SendElectionRequest(n)
+			wg.Done()
+		}()
 	}
-	if n.OathAcceptNum*2 > len(n.config) {
+	wg.Wait()
+	oathAcceptNum := n.GetOathAcceptNum()
+	if oathAcceptNum*2 > len(n.config) {
 		// 选举成功
 		logger.Logger().Info("选举成功",
 			zap.Uint("term", n.Term),
 			zap.String("leader", n.Id),
-			zap.Int("oath_accept_num", n.OathAcceptNum))
+			zap.Int("oath_accept_num", oathAcceptNum))
 		n.SetState(StateLeader)
 		go n.leaderSendHeart()
 	} else {
 		logger.Logger().Info("选举失败",
 			zap.Uint("term", n.Term),
 			zap.String("Leader", n.Id),
-			zap.Int("oath_accept_num", n.OathAcceptNum))
+			zap.Int("oath_accept_num", oathAcceptNum))
 		// 选举失败,重新选举
 	}
 }
@@ -242,3 +277,15 @@ func (n *Node) CheckAcceptId() {
 //	}
 //	return c.JSON(http.StatusOK, &AppendLogRet{code: 0, msg: "ok"})
 //}
+
+func (n *Node) AppendEntry() {
+	for _, node := range n.OtherNodeList {
+		conn, err := grpc.Dial(node.cfg.Address(), grpc.WithInsecure())
+		if err != nil {
+			continue
+		}
+		if err = newClient(conn, time.Second).SendAppendEntry(n, node); err != nil {
+			continue
+		}
+	}
+}

@@ -1,17 +1,28 @@
 package node
 
+import "MyRaft/logger"
+
 type NodeState int32
 type NodeRole int32
 
-const (
-	StateFollower    NodeState = 0 // 正常工作状态
-	StateNoAvailable NodeState = 1 // 不可用状态
-	StateCandidate   NodeState = 2 // 选举中
-	StateLeader      NodeState = 3 // leader状态
+func (ns NodeState) String() string {
+	switch ns {
+	case StateFollower:
+		return "FOLLOWER"
+	case StateCandidate:
+		return "CANDIDATE"
+	case StateLeader:
+		return "LEADER"
+	default:
+		logger.Sugar().Errorf("unknown node state:%d", ns)
+		return "INVALID_STATE"
+	}
+}
 
-	NodeRoleCandidate NodeRole = 0
-	NodeRoleLeader    NodeRole = 1
-	NodeRoleFollower  NodeRole = 2
+const (
+	StateFollower  NodeState = iota // 正常工作状态
+	StateCandidate                  // 选举中
+	StateLeader                     // leader状态
 )
 
 var Tern = 0
