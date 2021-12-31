@@ -1,9 +1,11 @@
 package node
 
 import (
+	"MyRaft/db"
 	"MyRaft/logger"
 	"MyRaft/node/rpc"
 	"fmt"
+	"github.com/go-redis/redis/v8"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"sync"
@@ -15,9 +17,10 @@ type DBServiceConfig struct {
 	Port int    `json:"port"`
 }
 type NodeConfig struct {
-	Host    string `json:"host"`
-	Port    int    `json:"port"`
-	LogPath string `json:"log"`
+	Host     string         `json:"host"`
+	Port     int            `json:"port"`
+	LogPath  string         `json:"log"`
+	RedisCfg db.RedisConfig `json:"redis_cfg"`
 }
 
 func (nc *NodeConfig) Address() string {
@@ -43,6 +46,7 @@ var lockOathAcceptNum = sync.RWMutex{}
 type Node struct {
 	*rpc.UnimplementedElectionServiceServer
 	*rpc.UnimplementedDBServiceServer
+	rdb           *redis.Client
 	Id            string `json:"id"`
 	electing      bool
 	lock          sync.RWMutex
@@ -60,6 +64,10 @@ type Node struct {
 	PreTerm       uint        `json:"pre_term"` // 任期
 }
 
+func (n *Node) GetRedisKey() string {
+	return fmt.Sprintf("node_%v", n.Id)
+}
+
 func (n *Node) GetItemByIndex(index uint) *Item {
 	for _, item := range n.ItemList {
 		if item.Index == index {
@@ -69,6 +77,19 @@ func (n *Node) GetItemByIndex(index uint) *Item {
 	return nil
 }
 
+func (n *Node) GetNextItem(item *Item) *Item {
+	var next *Item = nil
+	nextFlag := false
+	for _, v := range n.ItemList {
+		if v.Index == item.Index {
+			nextFlag = true
+		}
+		if nextFlag {
+			next = v
+		}
+	}
+	return next
+}
 func (n *Node) GetPreItem(item *Item) *Item {
 	var pre *Item = &Item{Index: 0, Term: 0, Log: ""}
 	if item == nil {
@@ -148,6 +169,12 @@ func CreateNode(nodeCfgList []NodeConfig, index int) *Node {
 		}
 		thisNode.OtherNodeList = append(thisNode.OtherNodeList, &WorkNode{id: index, cfg: cfg, commitIndex: 0, acceptIndex: 0})
 	}
+	rdsCfg := nodeCfgList[index].RedisCfg
+	thisNode.rdb = redis.NewClient(&redis.Options{
+		Addr:     rdsCfg.Address,
+		Password: rdsCfg.Password, // no password set
+		DB:       rdsCfg.DB,       // use default DB
+	})
 	return thisNode
 }
 
@@ -280,12 +307,15 @@ func (n *Node) CheckAcceptId() {
 
 func (n *Node) AppendEntry() {
 	for _, node := range n.OtherNodeList {
-		conn, err := grpc.Dial(node.cfg.Address(), grpc.WithInsecure())
-		if err != nil {
-			continue
-		}
-		if err = newClient(conn, time.Second).SendAppendEntry(n, node); err != nil {
-			continue
-		}
+		go func() {
+			conn, err := grpc.Dial(node.cfg.Address(), grpc.WithInsecure())
+			if err != nil {
+				return
+			}
+			cli := newClient(conn, time.Second)
+			if err = cli.SendAppendEntry(n, node); err != nil {
+				return
+			}
+		}()
 	}
 }

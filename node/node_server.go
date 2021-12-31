@@ -5,6 +5,8 @@ import (
 	"MyRaft/node/rpc"
 	"context"
 	"encoding/json"
+	"fmt"
+	"github.com/go-redis/redis/v8"
 	"go.uber.org/zap"
 	"time"
 )
@@ -54,22 +56,25 @@ func (n *Node) Election(ctx context.Context, in *rpc.ElectionRequest) (*rpc.Elec
 		zap.Bool("accept", accept))
 	return &rpc.ElectionReply{Accept: accept, Term: uint32(n.Term), Index: uint32(n.configIndex)}, nil
 }
-func (n *Node) Append(ctx context.Context, in *rpc.AppendEntryRequest) (*rpc.AppendEntryReply, error) {
-	reply := &rpc.AppendEntryReply{AppendIndex: in.GetEntry().GetIndex()}
+func (n *Node) Append(ctx context.Context, in *rpc.AppendEntryRequest) (reply *rpc.AppendEntryReply, err error) {
+	reply = &rpc.AppendEntryReply{Accept: false, AppendIndex: in.GetEntry().GetIndex()}
 	item := n.GetTailItem()
 	entry := in.GetEntry()
 	if item.Term == uint(in.PreTerm) && item.Index == uint(in.PreIndex) && uint32(item.Index+1) == in.GetEntry().GetIndex() {
-		n.ItemList = append(n.ItemList, &Item{
+		newItem := &Item{
 			Index: uint(entry.Index),
 			Term:  uint(entry.GetTerm()),
-			Log:   entry.GetValue()},
-		)
-		n.Term = uint(entry.GetTerm())
-		reply.Accept = true
-		reply.AppendIndex = entry.GetIndex()
-	} else {
-		reply.Accept = false
-		reply.AppendIndex = uint32(item.Index)
+			Log:   entry.GetValue(),
+		}
+		newItemStr, _ := json.Marshal(newItem)
+		err = n.rdb.HSet(ctx, n.GetRedisKey(), fmt.Sprintf("%v", entry.Index), newItemStr).Err()
+		if err == nil || err == redis.Nil {
+			n.ItemList = append(n.ItemList, newItem)
+			n.Term = uint(entry.GetTerm())
+			reply.Accept = true
+			reply.AppendIndex = entry.GetIndex()
+			err = nil
+		}
 	}
 	if reply.Accept {
 		if n.Id != in.From {
@@ -78,7 +83,8 @@ func (n *Node) Append(ctx context.Context, in *rpc.AppendEntryRequest) (*rpc.App
 		if in.CommitIndex == uint32(n.CommitIndex+1) && item.Index > n.CommitIndex {
 			n.CommitIndex++
 		}
-		reply.CommitIndex = uint32(n.CommitIndex)
+	} else {
+		reply.AppendIndex = uint32(item.Index)
 	}
 	reply.CommitIndex = uint32(n.CommitIndex)
 	entryStr, _ := json.Marshal(in.Entry)
@@ -90,5 +96,5 @@ func (n *Node) Append(ctx context.Context, in *rpc.AppendEntryRequest) (*rpc.App
 		zap.Uint32("in_commit_index", in.CommitIndex),
 		zap.String("in_from", in.From),
 		zap.String("entry", string(entryStr)))
-	return reply, nil
+	return reply, err
 }

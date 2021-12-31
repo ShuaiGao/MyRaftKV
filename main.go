@@ -17,11 +17,11 @@ import (
 )
 
 type Config struct {
-	Hello         string                 `json:"hello"`
-	NodeList      []node.NodeConfig      `json:"node_list"`
-	DBServiceList []node.DBServiceConfig `json:"db_service_list"`
-	LogConfig     zap.Config             `json:"log"`
-	RedisConfig   db.RedisConfig         `json:"redis"`
+	Hello            string                 `json:"hello"`
+	NodeList         []node.NodeConfig      `json:"node_list"`
+	RedisServiceList []node.DBServiceConfig `json:"redis_service_list"`
+	LogConfig        zap.Config             `json:"log"`
+	RedisConfig      db.RedisConfig         `json:"redis"`
 }
 
 func loadConfig() *Config {
@@ -99,6 +99,6 @@ func main() {
 	defer log.Sync()
 	db.ConnectRedis(config.RedisConfig)
 	log.Sugar().Info("Redis connect :%s", config.RedisConfig)
-	go CreateService(node.GetNode(), config.DBServiceList, *IndexFlag)
+	go CreateService(node.GetNode(), config.RedisServiceList, *IndexFlag)
 	CreateNodeService(config.NodeList, *IndexFlag)
 }

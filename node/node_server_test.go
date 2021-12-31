@@ -3,6 +3,11 @@ package node
 import (
 	"MyRaft/node/rpc"
 	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"github.com/go-redis/redis/v8"
+	"github.com/go-redis/redismock/v8"
 	"github.com/stretchr/testify/assert"
 	"reflect"
 	"sync"
@@ -24,7 +29,7 @@ func TestNode_Heart2(t *testing.T) {
 	assert.Greater(t, n.heartBeat.Sub(preTime), time.Duration(1))
 }
 
-func TestNode_Oath(t *testing.T) {
+func TestNode_Election(t *testing.T) {
 	type fields struct {
 		id            string
 		electing      bool
@@ -106,18 +111,77 @@ func TestNode_Oath(t *testing.T) {
 	}
 }
 
+func TestNode_Gao(t *testing.T) {
+	var ctx = context.TODO()
+
+	// get redis.Client and mock
+	db, mock := redismock.NewClientMock()
+
+	//the order of commands expected and executed must be the same
+	//this is the default value
+	mock.MatchExpectationsInOrder(true)
+
+	//simple matching
+
+	//retErr := errors.New("just test")
+	//mock.ExpectHSet("key", "ggg", "sss").RedisNil()
+	mock.ExpectHSet("key", "ggg", "sss").RedisNil()
+	result := db.HSet(ctx, "key", "ggg", "sss").Err()
+	assert.Equal(t, result, redis.Nil)
+	//db.HSet(ctx, "key", "ggg", "sss").Err(), nil)
+	//hget command return error
+	mock.ExpectHGet("key", "field").SetErr(errors.New("error"))
+	assert.Equal(t, db.HGet(ctx, "key", "field").Err(), errors.New("error"))
+
+	//hget command return value
+	mock.ExpectHGet("key", "field").SetVal("test value")
+	assert.Equal(t, db.HGet(ctx, "key", "field").Val(), "test value")
+
+	//hget command return redis.Nil
+	mock.ExpectHGet("key", "field").RedisNil()
+	assert.Equal(t, db.HGet(ctx, "key", "field").Err(), redis.Nil)
+
+	//hget command... do not set return
+	mock.ExpectHGet("key", "field")
+	assert.NotEqual(t, db.HGet(ctx, "key", "field").Err(), nil)
+
+	//------------
+
+	//clean up all expectations
+	//reset expected redis command
+	mock.ClearExpect()
+}
 func TestNode_Append2(t *testing.T) {
-	n := Node{Term: 8, state: StateLeader, CommitIndex: 0, ItemList: []*Item{{Index: 0, Term: 0, Log: ""}}}
+	db, mock := redismock.NewClientMock()
+	n := Node{Term: 8, Id: "0", state: StateLeader, rdb: db, CommitIndex: 0, ItemList: []*Item{{Index: 0, Term: 0, Log: ""}}}
 	in := &rpc.AppendEntryRequest{Entry: &rpc.Entry{Term: 8, Index: 1, Value: "hello"}, PreTerm: 0, PreIndex: 0}
+	newItem := &Item{
+		Index: uint(in.Entry.Index),
+		Term:  uint(in.Entry.GetTerm()),
+		Log:   in.Entry.GetValue(),
+	}
+	newItemStr, _ := json.Marshal(newItem)
+	mock.ExpectHSet(n.GetRedisKey(), fmt.Sprintf("%v", newItem.Index), newItemStr).RedisNil()
+	//mock.Regexp().ExpectHSet("node_0_1", newItemStr, 0)
 	reply, err := n.Append(context.Background(), in)
 	assert.Nil(t, err)
 	assert.Equal(t, true, reply.GetAccept())
 	assert.Equal(t, 2, len(n.ItemList))
 	assert.Equal(t, uint(1), n.GetTailItem().Index)
 	assert.Equal(t, uint(8), n.GetTailItem().Term)
-
-	n = Node{Term: 8, state: StateFollower, CommitIndex: 0, ItemList: []*Item{{Index: 0, Term: 0, Log: ""}}}
-	reply, err = n.Append(context.Background(), in)
+}
+func TestNode_Append3(t *testing.T) {
+	db, mock := redismock.NewClientMock()
+	n := Node{Term: 8, Id: "0", state: StateFollower, rdb: db, CommitIndex: 0, ItemList: []*Item{{Index: 0, Term: 0, Log: ""}}}
+	in := &rpc.AppendEntryRequest{Entry: &rpc.Entry{Term: 8, Index: 1, Value: "hello"}, PreTerm: 0, PreIndex: 0}
+	newItem := &Item{
+		Index: uint(in.Entry.Index),
+		Term:  uint(in.Entry.GetTerm()),
+		Log:   in.Entry.GetValue(),
+	}
+	newItemStr, _ := json.Marshal(newItem)
+	mock.ExpectHSet(n.GetRedisKey(), fmt.Sprintf("%v", newItem.Index), newItemStr).RedisNil()
+	reply, err := n.Append(context.Background(), in)
 	assert.Nil(t, err)
 	assert.Equal(t, true, reply.GetAccept())
 	assert.Equal(t, 2, len(n.ItemList))
@@ -127,8 +191,15 @@ func TestNode_Append2(t *testing.T) {
 
 	// 新的消息Term更大，使用更大的
 	for _, st := range []NodeState{StateFollower, StateLeader, StateCandidate} {
-		n = Node{Id: "1", Term: 8, state: st, CommitIndex: 0, ItemList: []*Item{{Index: 10, Term: 2, Log: "vvv"}}}
+		n = Node{Id: "1", rdb: db, Term: 8, state: st, CommitIndex: 0, ItemList: []*Item{{Index: 10, Term: 2, Log: "vvv"}}}
 		in = &rpc.AppendEntryRequest{Entry: &rpc.Entry{Term: 9, Index: 11, Value: "hello"}, PreTerm: 2, PreIndex: 10, From: "8"}
+		newItem = &Item{
+			Index: uint(in.Entry.Index),
+			Term:  uint(in.Entry.GetTerm()),
+			Log:   in.Entry.GetValue(),
+		}
+		newItemStr, _ = json.Marshal(newItem)
+		mock.ExpectHSet(n.GetRedisKey(), fmt.Sprintf("%v", newItem.Index), newItemStr).RedisNil()
 		reply, err = n.Append(context.Background(), in)
 		assert.Nil(t, err)
 		assert.Equal(t, true, reply.GetAccept())
@@ -242,10 +313,12 @@ func TestNode_Append(t *testing.T) {
 			wantErr: false,
 		},
 	}
+	db, mock := redismock.NewClientMock()
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			n := &Node{
 				UnimplementedElectionServiceServer: tt.fields.UnimplementedElectionServiceServer,
+				rdb:                                db,
 				Id:                                 tt.fields.id,
 				electing:                           tt.fields.electing,
 				Term:                               tt.fields.Term,
@@ -259,7 +332,15 @@ func TestNode_Append(t *testing.T) {
 				ItemList:                           tt.fields.ItemList,
 				CommitIndex:                        tt.fields.CommitIndex,
 			}
+			newItem := &Item{
+				Index: uint(tt.args.in.Entry.Index),
+				Term:  uint(tt.args.in.Entry.GetTerm()),
+				Log:   tt.args.in.Entry.GetValue(),
+			}
+			newItemStr, _ := json.Marshal(newItem)
+			mock.ExpectHSet(n.GetRedisKey(), fmt.Sprintf("%v", newItem.Index), newItemStr).RedisNil()
 			got, err := n.Append(tt.args.ctx, tt.args.in)
+			mock.ClearExpect()
 			if (err != nil) != tt.wantErr {
 				t.Errorf("Append() error = %v, wantErr %v", err, tt.wantErr)
 				return

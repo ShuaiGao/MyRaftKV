@@ -1,6 +1,6 @@
 {
   "hello": "ok",
-  "db_service_list": [
+  "redis_service_list": [
     {
       "host": "localhost",
       "port": 7101
@@ -18,17 +18,32 @@
     {
       "host": "localhost",
       "port": 7001,
-      "log": "./log/log_1"
+      "log": "./log/log_1",
+      "redis_config": {
+        "address": "localhost:6379",
+        "password": "",
+        "db": 0
+      }
     },
     {
       "host": "localhost",
       "port": 7002,
-      "log": "./log/log_2"
+      "log": "./log/log_2",
+      "redis_config": {
+        "address": "localhost:6379",
+        "password": "",
+        "db": 0
+      }
     },
     {
       "host": "localhost",
       "port": 7003,
-      "log": "./log/log_3"
+      "log": "./log/log_3",
+      "redis_config": {
+        "address": "localhost:6379",
+        "password": "",
+        "db": 0
+      }
     }
   ],
   "redis": {

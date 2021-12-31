@@ -107,6 +107,29 @@ func (cli Client) SendAppendEntry(n *Node, node *WorkNode) error {
 		node.commitIndex = uint(reply.CommitIndex)
 		n.CheckAcceptId()
 		n.CheckCommitId()
+	} else {
+		go func() {
+			for preItem != nil {
+				item := preItem
+				preItem := n.GetPreItem(item)
+				appendEntry := &rpc.AppendEntryRequest{
+					Entry:    &rpc.Entry{Term: uint32(item.Term), Index: uint32(item.Index), Value: item.Log},
+					PreIndex: uint32(preItem.Index),
+					PreTerm:  uint32(preItem.Term),
+					From:     n.Id,
+				}
+				if node.commitIndex < node.acceptIndex {
+					appendEntry.CommitIndex = uint32(node.commitIndex + 1)
+				}
+				reply, err := c.Append(ctx, appendEntry)
+				if err != nil {
+					return
+				}
+				if reply.GetAccept() {
+					preItem = n.GetNextItem(item)
+				}
+			}
+		}()
 	}
 	logger.Logger().Info("append_entry",
 		zap.Int("send_to", node.id),
