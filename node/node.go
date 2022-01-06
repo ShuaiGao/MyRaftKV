@@ -62,6 +62,9 @@ type Node struct {
 	CommitIndex   uint        `json:"commit_index"`
 	AcceptIndex   uint        `json:"accept_index"`
 	PreTerm       uint        `json:"pre_term"` // 任期
+
+	tickC chan struct{}
+	stop  chan struct{}
 }
 
 func (n *Node) GetRedisKey() string {
@@ -194,19 +197,28 @@ func (n *Node) Start() {
 }
 func (n *Node) loop() {
 	//logger.Logger().Info("node_loop", zap.Uint("term", n.Term), zap.Int("state", int(n.GetState())))
-	if n.GetState() == StateCandidate {
-		// 选举过程
-		n.election()
-	} else if n.GetState() == StateLeader {
-		//logger.Logger().Info("Leader 广播心跳")
-		go n.leaderSendHeart()
-	} else {
-		// 心跳
-		dis := time.Since(n.heartBeat)
-		if dis.Nanoseconds() > TimeoutNanSecond {
-			// 超时
-			//n.OtherNodeList = []WorkNode{}
-			n.timeout()
+	//if n.GetState() == StateCandidate {
+	//	// 选举过程
+	//	n.election()
+	//} else if n.GetState() == StateLeader {
+	//	//logger.Logger().Info("Leader 广播心跳")
+	//	go n.leaderSendHeart()
+	//} else {
+	//	// 心跳
+	//	dis := time.Since(n.heartBeat)
+	//	if dis.Nanoseconds() > TimeoutNanSecond {
+	//		// 超时
+	//		//n.OtherNodeList = []WorkNode{}
+	//		n.timeout()
+	//	}
+	//}
+	for {
+		select {
+		case <-n.tickC:
+			logger.Logger().Info("node_tick", zap.Uint("term", n.Term), zap.Int("state", int(n.GetState())))
+		case <-n.stop:
+			logger.Logger().Info("node_stop", zap.Uint("term", n.Term), zap.Int("state", int(n.GetState())))
+			break
 		}
 	}
 }

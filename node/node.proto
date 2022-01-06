@@ -10,6 +10,23 @@ service electionService {
     rpc Append(AppendEntryRequest) returns (AppendEntryReply) {}
 }
 
+enum MsgType {
+    Vote = 0;
+    Append = 1;
+    Heart = 2;
+}
+message RequestMessage {
+    MsgType msg_type = 1;
+    uint32 from = 2;
+    uint32 to = 3;
+    uint32 term = 4;
+    uint32 index = 5;
+}
+
+message ReplyMessage {
+    MsgType msg_type = 1;
+    bool vote_result = 2;
+}
 
 message ElectionRequest {
     string node_id = 1;
@@ -55,9 +72,9 @@ service DBService {
     rpc DBAppend(DBAppendLogRequest) returns (DBAppendLogReply) {}
 }
 
-message DBAppendLogRequest{
+message DBAppendLogRequest {
     string log = 1;
 }
-message DBAppendLogReply{
+message DBAppendLogReply {
     int32 ret = 1;
 }
