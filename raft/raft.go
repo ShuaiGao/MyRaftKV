@@ -11,6 +11,19 @@ import (
 
 const None uint64 = 0
 
+type StateType uint64
+
+var stmap = [...]string{
+	"StateFollower",
+	"StateCandidate",
+	"StateLeader",
+	"StatePreCandidate",
+}
+
+func (st StateType) String() string {
+	return stmap[st]
+}
+
 type Config struct {
 	ID uint64
 	// 选举超时时长，follower在该时长内未收到leader的任何消息时，将转换为candidate
@@ -102,6 +115,16 @@ func (r *raft) promotable() bool {
 func (r *raft) pastElectionTimeout() bool {
 	return r.electionElapsed >= r.randomizedElectionTimeout
 }
+func (r *raft) responseToReadIndexReq(req raftPB.RaftMessage, readIndex uint64) raftPB.RaftMessage {
+	if req.From == None || req.From == r.id {
+	}
+	return raftPB.RaftMessage{
+		Type:    raftPB.MessageType_MsgReadIndexResp,
+		To:      req.From,
+		Index:   readIndex,
+		Entries: req.Entries,
+	}
+}
 
 func newRaft(c *Config) *raft {
 	if err := c.validate(); err != nil {
@@ -185,15 +208,164 @@ func (r *raft) becomeLeader() {
 	r.logger.Infof("%x become leader at term %d", r.id, r.Term)
 }
 func (r *raft) Step(m raftPB.RaftMessage) error {
+	switch {
+	case m.Term == 0:
+		// 本地消息
+	case m.Term > r.Term:
+		if m.Type == raftPB.MessageType_MsgPreVote || m.Type == raftPB.MessageType_MsgVote {
+
+		}
+		switch {
+		case m.Type == raftPB.MessageType_MsgPreVote:
+		// 回复PreVote消息时，不改变term
+		case m.Type == raftPB.MessageType_MsgPreVoteResp && !m.Reject:
+		default:
+			r.logger.Infof("%x [term: %d] received a %s message with higher term from %x [term :%d]", r.id, r.Term, m.Type, m.From, m.Term)
+			if m.Type == raftPB.MessageType_MsgApp || m.Type == raftPB.MessageType_MsgHeartbeat || m.Type == raftPB.MessageType_MsgSnap {
+				r.becomeFollower(m.Term, m.From)
+			} else {
+				r.becomeFollower(m.Term, None)
+			}
+		}
+	case m.Term < r.Term:
+	}
+	switch m.Type {
+	case raftPB.MessageType_MsgHup:
+		//if r.preVote
+	case raftPB.MessageType_MsgVote, raftPB.MessageType_MsgPreVote:
+
+	}
 	return nil
 }
 func stepLeader(r *raft, m raftPB.RaftMessage) error {
+	switch m.Type {
+	case raftPB.MessageType_MsgBeat:
+		r.becomeLeader()
+		return nil
+	case raftPB.MessageType_MsgCheckQuorum:
+		return nil
+	case raftPB.MessageType_MsgProp:
+		if len(m.Entries) == 0 {
+			r.logger.Panicf("%s stepped empty MsgProp", r.id)
+		}
+		if r.trk.Progress[r.id] == nil {
+			return ErrProposalDropped
+		}
+		if r.leadTransferee != None {
+			r.logger.Debugf("%x [term %d] transfer leadership to %x is in progress; dropping proposal", r.id, r.Term, r.leadTransferee)
+			return ErrProposalDropped
+		}
+	//for i:= range m.Entries{
+	//	e := &m.Entries[i]
+	//	var cc raftPB.ConfChange
+	//}
+	case raftPB.MessageType_MsgReadIndex:
+		if r.trk.IsSingleton() {
+			if resp := r.responseToReadIndexReq(m, r.raftLog.committed); resp.To != None {
+				r.send(resp)
+			}
+			return nil
+		}
+		return nil
+	}
+
+	pr := r.trk.Progress[m.From]
+	if pr == nil {
+		r.logger.Debugf("%s no progress available for %x", r.id, m.From)
+		return nil
+	}
+	switch m.Type {
+	case raftPB.MessageType_MsgAppResp:
+		pr.RecentActive = true
+		if m.Reject {
+
+		} else {
+
+		}
+	case raftPB.MessageType_MsgHeartbeatResp:
+		pr.RecentActive = true
+		pr.ProbeSent = false
+
+		if pr.State == tracker.StateReplicate && pr.Inflights.Full() {
+			pr.Inflights.FreeFirstOne()
+		}
+	case raftPB.MessageType_MsgUnreachable:
+		if pr.State == tracker.StateReplicate {
+			pr.BecomeProbe()
+		}
+		r.logger.Debugf("%x failed to send message to %x because it is unreachable [%s]", r.id, m.From, pr)
+	case raftPB.MessageType_MsgTransferLeader:
+		if pr.IsLearner {
+			r.logger.Debugf("%x is learner. Ignored transferring leadership", r.id)
+			return nil
+		}
+		leadTransferee := m.From
+		lastLeadTransferee := r.leadTransferee
+		if lastLeadTransferee != None {
+			if lastLeadTransferee == leadTransferee {
+				r.logger.Infof("%x [term %d] transfer leadership to %x is in progress, ignores request to same node %x", r.id, r.Term, leadTransferee, leadTransferee)
+				return nil
+			}
+			r.abortLeaderTransfer()
+			r.logger.Infof("%x [term %d] abort previous Transferring leadership to %x", r.id, r.Term, lastLeadTransferee)
+		}
+	}
 	return nil
 }
+
+var ErrStepLocalMsg = errors.New("raft: cannot step raft local message")
+var ErrProposalDropped = errors.New("raft proposal dropped")
+
 func stepCandidate(r *raft, m raftPB.RaftMessage) error {
+	var myVoteRespType raftPB.MessageType
+	if r.state == state.StatePreCandidate {
+		myVoteRespType = raftPB.MessageType_MsgPreVoteResp
+	} else {
+		myVoteRespType = raftPB.MessageType_MsgVoteResp
+	}
+	switch m.Type {
+	case raftPB.MessageType_MsgProp:
+		r.logger.Infof("%x no leader at term %d; dropping proposal", r.id, r.Term)
+		return ErrProposalDropped
+	case raftPB.MessageType_MsgApp:
+		r.becomeFollower(m.Term, m.From)
+		r.handleAppendEntries(m)
+	case raftPB.MessageType_MsgHeartbeat:
+		r.becomeFollower(m.Term, m.From)
+		r.handleHeartbeat(m)
+	case raftPB.MessageType_MsgSnap:
+		r.becomeFollower(m.Term, m.From)
+		r.handleSnapshot(m)
+	case myVoteRespType:
+	//gr, rj, res := r.poo
+	case raftPB.MessageType_MsgTimeoutNow:
+		r.logger.Debugf("%x [term %d state %v] ignored MsgTimeoutNow from %x", r.id, r.Term, r.state, m.From)
+	}
 	return nil
 }
 func stepFollower(r *raft, m raftPB.RaftMessage) error {
+	switch m.Type {
+	case raftPB.MessageType_MsgApp:
+		r.electionElapsed = 0
+		r.lead = m.From
+	case raftPB.MessageType_MsgHeartbeat:
+		r.electionElapsed = 0
+		r.lead = m.From
+		r.handleHeartbeat(m)
+	case raftPB.MessageType_MsgSnap:
+		r.electionElapsed = 0
+		r.lead = m.From
+		r.handleSnapshot(m)
+	case raftPB.MessageType_MsgTransferLeader:
+		if r.lead == None {
+			r.logger.Infof("%x no leader at term %d; dropping leader transfer msg", r.id, r.Term)
+			return nil
+		}
+		m.To = r.lead
+		r.send(m)
+	case raftPB.MessageType_MsgTimeoutNow:
+		r.logger.Infof("%x [term %d] received MsgTimeoutNow from %x and starts an election to get leadership.", r.id, r.Term, m.From)
+	}
 	return nil
 
 }
