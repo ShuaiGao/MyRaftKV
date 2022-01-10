@@ -4,6 +4,11 @@ import raftPB "MyRaft/raft/raftpb"
 
 type Config struct {
 }
+
+func (c *Config) Clone() Config {
+	return Config{}
+}
+
 type ProgressTracker struct {
 	Config
 	Progress    ProgressMap

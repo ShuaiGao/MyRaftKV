@@ -3,7 +3,6 @@ package raft
 import (
 	raftPB "MyRaft/raft/raftpb"
 	"MyRaft/raft/tracker"
-	"MyRaft/state"
 	"errors"
 	"fmt"
 	"golang.org/x/exp/rand"
@@ -19,6 +18,14 @@ var stmap = [...]string{
 	"StateLeader",
 	"StatePreCandidate",
 }
+
+const (
+	StateFollower StateType = iota
+	StateCandidate
+	StateLeader
+	StatePreCandidate
+	numStates
+)
 
 func (st StateType) String() string {
 	return stmap[st]
@@ -47,16 +54,19 @@ func (c *Config) validate() error {
 
 type stepFunc func(r *raft, m raftPB.RaftMessage) error
 type raft struct {
-	id                        uint64
-	state                     state.StateEnum
+	id   uint64
+	Term uint64
+	Vote uint64
+
+	readStates []ReadState
+
+	state                     StateType
 	electionTimeout           int
 	heartbeatTimeout          int
 	randomizedElectionTimeout int
 	electionElapsed           int
 	heartbeatElapsed          int
 	checkQuorum               bool
-	Term                      uint64
-	Vote                      uint64
 	lead                      uint64
 	leadTransferee            uint64 // leader主动转换时的目标id
 	tick                      func()
@@ -67,6 +77,22 @@ type raft struct {
 	trk                       tracker.ProgressTracker
 }
 
+func (r *raft) hasLeader() bool {
+	return r.lead != None
+}
+func (r *raft) softState() *SoftState {
+	return &SoftState{
+		Lead:      r.lead,
+		RaftState: r.state,
+	}
+}
+func (r *raft) hardState() raftPB.HardState {
+	return raftPB.HardState{
+		Term:   r.Term,
+		Vote:   r.Vote,
+		Commit: r.raftLog.committed,
+	}
+}
 func (r *raft) resetRandomizedElectionTimeout() {
 	r.randomizedElectionTimeout = r.electionTimeout + rand.Intn(r.electionTimeout)
 }
@@ -108,6 +134,9 @@ func (r *raft) appendEntry(es ...raftPB.Entry) (accepted bool) {
 }
 func (r *raft) abortLeaderTransfer() {
 	r.leadTransferee = None
+}
+func (r *raft) advance(rd Ready) {
+
 }
 func (r *raft) promotable() bool {
 	return true
@@ -160,11 +189,11 @@ func (r *raft) tickHeartBeat() {
 			}
 		}
 		// 如果当前leader不能在选举超时时转移leader，再次成为leader
-		if r.state == state.StateLeader && r.leadTransferee != None {
+		if r.state == StateLeader && r.leadTransferee != None {
 			r.abortLeaderTransfer()
 		}
 	}
-	if r.state != state.StateLeader {
+	if r.state != StateLeader {
 		return
 	}
 	if r.heartbeatElapsed >= r.heartbeatTimeout {
@@ -179,29 +208,29 @@ func (r *raft) becomeFollower(term uint64, lead uint64) {
 	r.reset(term)
 	r.tick = r.tickElection
 	r.lead = lead
-	r.state = state.StateFollower
+	r.state = StateFollower
 	r.logger.Infof("%x become follower at term %d", r.id, r.Term)
 }
 func (r *raft) becomeCandidate() {
-	if r.state == state.StateLeader {
+	if r.state == StateLeader {
 		panic("invalid transition [leader -> candidate]")
 	}
 	r.step = stepCandidate
 	r.reset(r.Term + 1)
 	r.tick = r.tickElection
 	r.Vote = r.id
-	r.state = state.StateCandidate
+	r.state = StateCandidate
 	r.logger.Infof("%x became candidate at term %d", r.id, r.Term)
 }
 func (r *raft) becomeLeader() {
-	if r.state == state.StateFollower {
+	if r.state == StateFollower {
 		panic("invalid transition [follower -> leader]")
 	}
 	r.step = stepLeader
 	r.reset(r.Term)
 	r.tick = r.tickHeartBeat
 	r.lead = r.id
-	r.state = state.StateLeader
+	r.state = StateLeader
 
 	// TODO 暂时忽略
 
@@ -318,7 +347,7 @@ var ErrProposalDropped = errors.New("raft proposal dropped")
 
 func stepCandidate(r *raft, m raftPB.RaftMessage) error {
 	var myVoteRespType raftPB.MessageType
-	if r.state == state.StatePreCandidate {
+	if r.state == StatePreCandidate {
 		myVoteRespType = raftPB.MessageType_MsgPreVoteResp
 	} else {
 		myVoteRespType = raftPB.MessageType_MsgVoteResp

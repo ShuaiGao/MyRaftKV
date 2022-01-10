@@ -58,13 +58,53 @@ func (rn *RawNode) Step(m raftPB.RaftMessage) error {
 	return ErrStepPeerNotFound
 }
 
-//func (rn *RawNode) Ready() Ready {
-//
-//}
+func (rn *RawNode) Ready() Ready {
+	rd := rn.readyWithoutAccept()
+	rn.acceptReady(rd)
+	return rd
+}
+func (rn *RawNode) readyWithoutAccept() Ready {
+	return newReady(rn.raft, rn.prevSoftSt, rn.preHardSt)
+}
 func (rn *RawNode) TransferLeader(transferee uint64) {
 	_ = rn.raft.Step(raftPB.RaftMessage{Type: raftPB.MessageType_MsgTransferLeader, From: transferee})
 }
 
 func (rn *RawNode) ReadIndex(rctx []byte) {
 	_ = rn.raft.Step(raftPB.RaftMessage{Type: raftPB.MessageType_MsgReadIndex, Entries: []*raftPB.Entry{{Data: rctx}}})
+}
+func (rn *RawNode) Adbvance(rd Ready) {
+	if !IsEmptyHardState(rd.HardState) {
+		rn.preHardSt = rd.HardState
+	}
+	rn.raft.advance(rd)
+}
+func (rn *RawNode) acceptReady(rd Ready) {
+	if rd.SoftState != nil {
+		rn.prevSoftSt = rd.SoftState
+	}
+	if len(rd.ReadStates) != 0 {
+		rn.raft.readStates = nil
+	}
+	rn.raft.msgs = nil
+}
+
+func (rn *RawNode) HasReady() bool {
+	r := rn.raft
+	if !r.softState().equal(rn.prevSoftSt) {
+		return true
+	}
+	if hardSt := r.hardState(); !IsEmptyHardState(hardSt) && !isHardStateEqual(hardSt, rn.preHardSt) {
+		return true
+	}
+	if r.raftLog.hasPendingSnapshot() {
+		return true
+	}
+	if len(r.msgs) > 0 || len(r.raftLog.unstableEntries()) > 0 || r.raftLog.hasNextEnts() {
+		return true
+	}
+	if len(r.readStates) != 0 {
+		return true
+	}
+	return false
 }

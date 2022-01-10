@@ -3,6 +3,7 @@ package state
 import (
 	"MyRaft/logger"
 	"fmt"
+	"time"
 )
 
 type StateEnum int
@@ -41,6 +42,7 @@ type StateMachine struct {
 	close   chan struct{}
 	stMap   map[StateEnum]Machine
 	state   StateEnum
+	ready   chan Ready
 }
 type StateBase struct {
 	machine *StateMachine
@@ -58,7 +60,16 @@ func (sm *StateMachine) register(enum StateEnum, machine Machine) {
 	sm.stMap[enum] = machine
 	machine.SetStateMachine(sm)
 }
+
+type Ready struct {
+	msg string
+}
+
 func (sm *StateMachine) run() {
+	//var ready chan struct{} = make(chan struct{})
+	//var advance chan struct{} = make(chan struct{}, 1)
+	var rd Ready
+	//var rd Ready = Ready{msg: time.Second.String()}
 	for {
 		select {
 		case m := <-sm.switchC:
@@ -70,15 +81,35 @@ func (sm *StateMachine) run() {
 			}
 		case <-sm.close:
 			break
+		case sm.ready <- rd:
+			fmt.Println("ready ")
+			rd = Ready{}
+		//case <-advance:
+		//	fmt.Println("ready " + rd.msg)
+		//	rd = Ready{}
+		//	//advance = nil
+		case <-time.After(time.Second):
+			sm.empty()
+			rd = Ready{msg: time.Now().String()}
 		}
+		//fmt.Println("loop")
 		//time.Sleep(time.Millisecond)
 	}
+}
+
+func (sm *StateMachine) Ready() <-chan Ready {
+	return sm.ready
+}
+
+func (sm *StateMachine) empty() {
+	fmt.Println("state machine empty ")
 }
 
 func NewMachine() *StateMachine {
 	ins := &StateMachine{
 		switchC: make(chan Switch, 1),
 		close:   make(chan struct{}),
+		ready:   make(chan Ready),
 		stMap:   map[StateEnum]Machine{},
 	}
 	go ins.run()
