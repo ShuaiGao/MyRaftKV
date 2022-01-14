@@ -30,3 +30,13 @@ func TestStateMachine_SwitchTo(t *testing.T) {
 	time.Sleep(10 * time.Second)
 	machine.Stop()
 }
+
+type Memory struct {
+	index int
+}
+
+func TestInitStruct(t *testing.T) {
+	data := make([]Memory, 1)
+	fmt.Println(data[0].index)
+	fmt.Println(data[0].index)
+}

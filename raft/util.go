@@ -37,3 +37,10 @@ func voteRespMsgType(msgt raftPB.MessageType) raftPB.MessageType {
 		panic(fmt.Sprintf("not a vote message: %s", msgt))
 	}
 }
+
+func limitSize(ents []raftPB.Entry, maxSize uint64) []raftPB.Entry {
+	if len(ents) == 0 {
+		return ents
+	}
+	return ents
+}

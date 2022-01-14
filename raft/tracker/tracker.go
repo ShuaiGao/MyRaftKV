@@ -1,8 +1,12 @@
 package tracker
 
-import raftPB "MyRaft/raft/raftpb"
+import (
+	"MyRaft/raft/quorum"
+	raftPB "MyRaft/raft/raftpb"
+)
 
 type Config struct {
+	Voters quorum.JointConfig
 }
 
 func (c *Config) Clone() Config {
@@ -72,7 +76,11 @@ func (p *ProgressTracker) RecordVote(id uint64, v bool) {
 		p.Votes[id] = v
 	}
 }
-func (p *ProgressTracker) TallyVotes() (granted int, rejected int) {
+
+func (p *ProgressTracker) Committed() uint64 {
+	return uint64(p.Voters.)
+}
+func (p *ProgressTracker) TallyVotes() (granted int, rejected int, result quorum.VoteResult) {
 	for id, pr := range p.Progress {
 		if pr.IsLearner {
 			continue
@@ -87,7 +95,8 @@ func (p *ProgressTracker) TallyVotes() (granted int, rejected int) {
 			rejected++
 		}
 	}
-	return granted, rejected
+	result = p.Voters.VoteResult(p.Votes)
+	return granted, rejected, result
 }
 
 type matchAckIndexer map[uint64]*Progress

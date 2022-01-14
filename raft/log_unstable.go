@@ -63,3 +63,19 @@ func (u *unstable) shrinkEntriesArray() {
 		u.entries = newEntries
 	}
 }
+func (u *unstable) slice(lo uint64, hi uint64) []raftPB.Entry {
+	u.mustCheckOutOfBounds(lo, hi)
+	return u.entries[lo-u.offset : hi-u.offset]
+}
+func (u *unstable) mustCheckOutOfBounds(lo, hi uint64) {
+	if lo > hi {
+
+	}
+	//upper := u.offset + uint64(len(u.entries))
+}
+
+func (u *unstable) restore(s *raftPB.Snapshot) {
+	u.offset = s.Metadata.Index + 1
+	u.entries = nil
+	u.snapshot = s
+}

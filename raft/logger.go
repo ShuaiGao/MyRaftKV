@@ -15,6 +15,9 @@ type Logger interface {
 	Warn(v ...interface{})
 	Warnf(format string, v ...interface{})
 
+	Error(v ...interface{})
+	Errorf(format string, v ...interface{})
+
 	Fatal(v ...interface{})
 	Fatalf(format string, v ...interface{})
 
