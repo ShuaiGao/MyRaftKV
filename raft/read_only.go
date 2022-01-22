@@ -55,3 +55,32 @@ func (ro *readOnly) lastPendingRequestCtx() string {
 	}
 	return ro.readIndexQueue[len(ro.readIndexQueue)-1]
 }
+
+func (ro *readOnly) advance(m raftPB.RaftMessage) []*readIndexStatus {
+	var (
+		i     int
+		found bool
+	)
+	ctx := string(m.Context)
+	rss := []*readIndexStatus{}
+	for _, okctx := range ro.readIndexQueue {
+		i++
+		rs, ok := ro.pendingReadIndex[okctx]
+		if !ok {
+			panic("cannot find corresponding read state from pending map")
+		}
+		rss = append(rss, rs)
+		if okctx == ctx {
+			found = true
+			break
+		}
+	}
+	if found {
+		ro.readIndexQueue = ro.readIndexQueue[i:]
+		for _, rs := range rss {
+			delete(ro.pendingReadIndex, string(rs.req.Entries[0].Data))
+		}
+		return rss
+	}
+	return nil
+}

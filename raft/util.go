@@ -38,9 +38,13 @@ func voteRespMsgType(msgt raftPB.MessageType) raftPB.MessageType {
 	}
 }
 
-func limitSize(ents []raftPB.Entry, maxSize uint64) []raftPB.Entry {
+func limitSize(ents []*raftPB.Entry, maxSize uint64) []*raftPB.Entry {
 	if len(ents) == 0 {
 		return ents
 	}
 	return ents
+}
+
+func PayloadSize(e *raftPB.Entry) int {
+	return len(e.Data)
 }

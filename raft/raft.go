@@ -4,6 +4,7 @@ import (
 	"MyRaft/raft/quorum"
 	raftPB "MyRaft/raft/raftpb"
 	"MyRaft/raft/tracker"
+	"bytes"
 	"errors"
 	"fmt"
 	"golang.org/x/exp/rand"
@@ -103,9 +104,16 @@ type raft struct {
 	raftLog                   *raftLog
 	msgs                      []raftPB.RaftMessage
 	trk                       tracker.ProgressTracker
+	// 只有一个配置修改可以被添加（在一条日志中）
+	// 这里 强制使用 pendingConfIndex，它被设置为一个值 >= 最后一次配置修改日志的index
+	// 只有在leader的添加日志index大于这个值时，配置修改才可以被发起提议
+	pendingConfIndex uint64
 	// pendingReadIndexMessage 用于存储MsgReadIndex消息
 	//
 	pendingReadIndexMessages []raftPB.RaftMessage
+	// 未提交log大小的大小，用于防止日志无限增长，只再leader上维护
+	// 当任期修改时重置
+	uncommittedSize uint64
 }
 
 func (r *raft) hasLeader() bool {
@@ -127,7 +135,7 @@ func (r *raft) hardState() raftPB.HardState {
 func (r *raft) resetRandomizedElectionTimeout() {
 	r.randomizedElectionTimeout = r.electionTimeout + rand.Intn(r.electionTimeout)
 }
-func numOfPendingConf(ents []raftPB.Entry) int {
+func numOfPendingConf(ents []*raftPB.Entry) int {
 	n := 0
 	for i := range ents {
 		if ents[i].Type == raftPB.EntryType_EntryConfChange {
@@ -165,13 +173,32 @@ func (r *raft) reset(term uint64) {
 	r.resetRandomizedElectionTimeout()
 	r.abortLeaderTransfer()
 }
+func (r *raft) increaseUncommittedSize(ents []*raftPB.Entry) bool {
+	var s uint64
+	for _, e := range ents {
+		s += uint64(PayloadSize(e))
+	}
+	if r.uncommittedSize > 0 && s > 0 && r.uncommittedSize+s > r.maxUncommittedSize {
+		return false
+	}
+	r.uncommittedSize += s
+	return true
+}
 func (r *raft) appendEntry(es ...*raftPB.Entry) (accepted bool) {
 	li := r.raftLog.lastIndex()
 	for i := range es {
 		es[i].Term = r.Term
 		es[i].Index = li + 1 + uint64(i)
 	}
+	// Track the size of this uncommitted proposal
+	if !r.increaseUncommittedSize(es) {
+		r.logger.Debugf("%x appending new entries to log would exceed uncommitted entry size limit; dropping proposal", r.id)
+		// Drop the proposal
+		return false
+	}
 	li = r.raftLog.append(es...)
+	r.trk.Progress[r.id].MaybeUpdate(li)
+	r.maybeCommit()
 	return true
 }
 func (r *raft) abortLeaderTransfer() {
@@ -296,7 +323,13 @@ func (r *raft) Step(m raftPB.RaftMessage) error {
 		// 本地消息
 	case m.Term > r.Term:
 		if m.Type == raftPB.MessageType_MsgPreVote || m.Type == raftPB.MessageType_MsgVote {
-
+			force := bytes.Equal(m.Context, []byte(campaignTransfer))
+			inLease := r.checkQuorum && r.lead != None && r.electionElapsed < r.electionTimeout
+			if !force && inLease {
+				r.logger.Infof("%x [logterm: %d, index :%d, vote: %x] ignore %s from %x [logterm: %d, index: %d] at term %d: lease is not expired (remaining ticks: %d)",
+					r.id, r.raftLog.lastTerm(), r.raftLog.lastIndex(), r.Vote, m.Type, m.From, m.LogTerm, m.Index, r.Term, r.electionTimeout-r.electionElapsed)
+				return nil
+			}
 		}
 		switch {
 		case m.Type == raftPB.MessageType_MsgPreVote:
@@ -311,6 +344,20 @@ func (r *raft) Step(m raftPB.RaftMessage) error {
 			}
 		}
 	case m.Term < r.Term:
+		if (r.checkQuorum || r.preVote) && (m.Type == raftPB.MessageType_MsgHeartbeat || m.Type == raftPB.MessageType_MsgApp) {
+			// 在follower 发生网络分区的时候，它会很快地进入选举阶段，并携带一个更大的Term，即使它不会收到足够多的投票
+			// 当它的网络分区问题恢复的时候, 这里的 MsgAppResp 消息（携带更大的Term）会强制leader下线
+			// 然而，这种打断在发生网络分区并恢复的时候是必然发生的；这个问题可以使用Pre-Vote阶段避免
+			r.send(raftPB.RaftMessage{To: m.From, Type: raftPB.MessageType_MsgAppResp})
+		} else if m.Type == raftPB.MessageType_MsgPreVote {
+			r.logger.Infof("%x [logterm: %d, index: %d, bote: %x] rejected %s from %x [logterm: %d, index: %d] at term %d",
+				r.id, r.raftLog.lastTerm(), r.raftLog.lastIndex(), r.Vote, m.Type, m.From, m.LogTerm, m.Index, r.Term)
+			r.send(raftPB.RaftMessage{To: m.From, Term: r.Term, Type: raftPB.MessageType_MsgPreVoteResp, Reject: true})
+		} else {
+			r.logger.Infof("%x [term: %d] ignored a %s message with lower term from %x [term: %d]",
+				r.id, r.Term, m.Type, m.From, m.Term)
+		}
+		return nil
 	}
 	switch m.Type {
 	case raftPB.MessageType_MsgHup:
@@ -319,9 +366,27 @@ func (r *raft) Step(m raftPB.RaftMessage) error {
 		} else {
 			r.hup(campaignElection)
 		}
-
 	case raftPB.MessageType_MsgVote, raftPB.MessageType_MsgPreVote:
+		canVote := r.Vote == m.From ||
+			(r.Vote == None && r.lead == None) ||
+			(m.Type == raftPB.MessageType_MsgPreVote && m.Term > r.Term)
 
+		if canVote && r.raftLog.isUpToDate(m.Index, m.LogTerm) {
+			r.logger.Infof("%x [logterm: %d, index %d, vote: %x] cast %s for %x [logterm: %d, index: %d] at term %d",
+				r.id, r.raftLog.lastTerm(), r.raftLog.lastIndex(), r.Vote, m.Type, m.From, m.LogTerm, m.Index, r.Term)
+			r.send(raftPB.RaftMessage{To: m.From, Term: r.Term, Type: voteRespMsgType(m.Type), Reject: true})
+			if m.Type == raftPB.MessageType_MsgVote {
+				r.electionElapsed = 0
+				r.Vote = m.From
+			}
+		} else {
+			r.send(raftPB.RaftMessage{To: m.From, Term: r.Term, Type: voteRespMsgType(m.Type), Reject: true})
+		}
+	default:
+		err := r.step(r, m)
+		if err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -331,6 +396,8 @@ func stepLeader(r *raft, m raftPB.RaftMessage) error {
 		r.bcastHeartbeat()
 		return nil
 	case raftPB.MessageType_MsgCheckQuorum:
+		// leader 应当一直检查自己是否存活
+		// 作为一个预防措施，处理当leader不在配置中的情况（例如leader节点被移除）
 		return nil
 	case raftPB.MessageType_MsgProp:
 		if len(m.Entries) == 0 {
@@ -350,12 +417,30 @@ func stepLeader(r *raft, m raftPB.RaftMessage) error {
 
 			}
 			if cc != nil {
+				alreadyPending := r.pendingConfIndex > r.raftLog.applied
+				alreadyJoint := len(r.trk.Config.Voters[1]) > 0
+				wantsLeaveJoint := false
 
+				var refused string
+				if alreadyPending {
+					refused = fmt.Sprintf("possible unapplied conf change at index %d (applied to %d)", r.pendingConfIndex, r.raftLog.applied)
+				} else if alreadyJoint && !wantsLeaveJoint {
+					refused = "must transition out of joint config first"
+				} else if !alreadyJoint && wantsLeaveJoint {
+					refused = "not in joint state; refusing empty conf change"
+				}
+				if refused != "" {
+					r.logger.Infof("%x ignoring conf change %v at config %s: %s", r.id, cc, r.trk.Config, refused)
+				} else {
+					r.pendingConfIndex = r.raftLog.lastIndex() + uint64(i) + 1
+				}
 			}
 		}
 		if !r.appendEntry(m.Entries...) {
 			return ErrProposalDropped
 		}
+		r.bcastAppend()
+		return nil
 	case raftPB.MessageType_MsgReadIndex:
 		if r.trk.IsSingleton() {
 			if resp := r.responseToReadIndexReq(m, r.raftLog.committed); resp.To != None {
@@ -430,6 +515,21 @@ func stepLeader(r *raft, m raftPB.RaftMessage) error {
 
 		if pr.State == tracker.StateReplicate && pr.Inflights.Full() {
 			pr.Inflights.FreeFirstOne()
+		}
+		if pr.Match < r.raftLog.lastIndex() {
+			r.sendAppend(m.From)
+		}
+		if r.readOnly.option != ReadOnlySafe || len(m.Context) == 0 {
+			return nil
+		}
+		if r.trk.Voters.VoteResult(r.readOnly.recvAck(m.From, m.Context)) != quorum.VoteWon {
+			return nil
+		}
+		rss := r.readOnly.advance(m)
+		for _, rs := range rss {
+			if resp := r.responseToReadIndexReq(rs.req, rs.index); resp.To != None {
+				r.send(resp)
+			}
 		}
 	case raftPB.MessageType_MsgSnapStatus:
 		if pr.State != tracker.StateSnapshot {
@@ -510,7 +610,7 @@ func (r *raft) maybeSendAppend(to uint64, sendIfEmpty bool) bool {
 		if IsEmptySnap(snapshot) {
 			panic("need non-empty snapshot")
 		}
-		m.Snapshot = snapshot
+		m.Snapshot = &snapshot
 		sindex, sterm := snapshot.Metadata.Index, snapshot.Metadata.Term
 		r.logger.Debugf("%x [firstindex: %d, commit:%d] sent snapshot[index: %d, term: %d] to %x [%s]",
 			r.id, r.raftLog.firstIndex(), r.raftLog.committed, sindex, sterm, to, pr)
@@ -563,7 +663,19 @@ func stepCandidate(r *raft, m raftPB.RaftMessage) error {
 		r.becomeFollower(m.Term, m.From)
 		r.handleSnapshot(m)
 	case myVoteRespType:
-	//gr, rj, res := r.poo
+		gr, rj, res := r.poll(m.From, m.Type, !m.Reject)
+		r.logger.Infof("%x has received %d %s votes and %d vote rejections", r.id, gr, m.Type, rj)
+		switch res {
+		case quorum.VoteWon:
+			if r.state == StatePreCandidate {
+				r.campaign(campaignElection)
+			} else {
+				r.becomeLeader()
+				r.bcastAppend()
+			}
+		case quorum.VoteLost:
+			r.becomeFollower(r.Term, None)
+		}
 	case raftPB.MessageType_MsgTimeoutNow:
 		r.logger.Debugf("%x [term %d state %v] ignored MsgTimeoutNow from %x", r.id, r.Term, r.state, m.From)
 	}

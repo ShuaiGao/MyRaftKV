@@ -4,7 +4,7 @@ import raftPB "MyRaft/raft/raftpb"
 
 type unstable struct {
 	snapshot *raftPB.Snapshot
-	entries  []raftPB.Entry
+	entries  []*raftPB.Entry
 	offset   uint64
 	logger   Logger
 }
@@ -58,12 +58,12 @@ func (u *unstable) shrinkEntriesArray() {
 	if len(u.entries) == 0 {
 		u.entries = nil
 	} else if len(u.entries)*lenMultiple < cap(u.entries) {
-		newEntries := make([]raftPB.Entry, len(u.entries))
+		newEntries := make([]*raftPB.Entry, len(u.entries))
 		copy(newEntries, u.entries)
 		u.entries = newEntries
 	}
 }
-func (u *unstable) slice(lo uint64, hi uint64) []raftPB.Entry {
+func (u *unstable) slice(lo uint64, hi uint64) []*raftPB.Entry {
 	u.mustCheckOutOfBounds(lo, hi)
 	return u.entries[lo-u.offset : hi-u.offset]
 }

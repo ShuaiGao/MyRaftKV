@@ -3,7 +3,6 @@ package raft
 import (
 	raftPB "MyRaft/raft/raftpb"
 	"fmt"
-	"google.golang.org/grpc/benchmark/latency"
 	"log"
 	"math"
 )
@@ -83,11 +82,23 @@ func (rl *raftLog) slice(lo, hi, maxSize uint64) ([]*raftPB.Entry, error) {
 		ents = storedEnts
 	}
 	if hi > rl.unstable.offset {
-		unstable := rl.unstable.slice()
+		unstable := rl.unstable.slice(max(lo, rl.unstable.offset), hi)
+		if len(ents) > 0 {
+			combined := make([]*raftPB.Entry, len(ents)+len(unstable))
+			n := copy(combined, ents)
+			copy(combined[n:], unstable)
+			ents = combined
+		} else {
+			ents = unstable
+		}
 	}
-	return nil, nil
+	return limitSize(ents, maxSize), nil
 }
 
+// isUpToDate 判断给定的参数(lastIndex, term) 是否是更新的log
+func (rl *raftLog) isUpToDate(lasti, term uint64) bool {
+	return term > rl.lastTerm() || (term == rl.lastTerm() && lasti >= rl.lastIndex())
+}
 func (rl *raftLog) snapshot() (raftPB.Snapshot, error) {
 	if rl.unstable.snapshot != nil {
 		return *rl.unstable.snapshot, nil
@@ -109,7 +120,7 @@ func (rl *raftLog) hasPendingSnapshot() bool {
 	//return l.unsta
 	return false
 }
-func (rl *raftLog) unstableEntries() []raftPB.Entry {
+func (rl *raftLog) unstableEntries() []*raftPB.Entry {
 	if len(rl.unstable.entries) == 0 {
 		return nil
 	}

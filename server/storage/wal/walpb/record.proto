@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+package walpb;
+
+option go_package = ".;walPB";
+
+message Record {
+    int64 type = 1;
+    uint32 crc = 2;
+    bytes data = 3;
+}
+
+message Snapshot{
+    uint64 index=1;
+    uint64 term=2;
+//    raftpb.ConState conf_state = 3;
+}

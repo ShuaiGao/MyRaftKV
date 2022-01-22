@@ -78,7 +78,7 @@ func (p *ProgressTracker) RecordVote(id uint64, v bool) {
 }
 
 func (p *ProgressTracker) Committed() uint64 {
-	return uint64(p.Voters.)
+	return uint64(p.Voters.CommittedIndex(matchAckIndexer(p.Progress)))
 }
 func (p *ProgressTracker) TallyVotes() (granted int, rejected int, result quorum.VoteResult) {
 	for id, pr := range p.Progress {
@@ -101,6 +101,10 @@ func (p *ProgressTracker) TallyVotes() (granted int, rejected int, result quorum
 
 type matchAckIndexer map[uint64]*Progress
 
-//func (l matchAckIndexer) AckedIndex(id uint64) (quorum.Index, bool) {
-//
-//}
+func (l matchAckIndexer) AckedIndex(id uint64) (quorum.Index, bool) {
+	pr, ok := l[id]
+	if !ok {
+		return 0, false
+	}
+	return quorum.Index(pr.Match), true
+}

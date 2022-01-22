@@ -13,7 +13,7 @@ var ErrSnapshotTemporarilyUnavailable = errors.New("snapshot is temporarily unav
 
 type Storage interface {
 	InitialState() (raftPB.HardState, raftPB.ConfState, error)
-	Entries(lo, hi, maxSize uint64) ([]raftPB.Entry, error)
+	Entries(lo, hi, maxSize uint64) ([]*raftPB.Entry, error)
 	// Term returns the term of entry i, thich must be in the range
 	// [FirstIndex()-1, LastIndex()]. The term of the entry before
 	// FirstIndex is retained for matching purposes even though the
